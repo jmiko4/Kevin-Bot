@@ -28,12 +28,14 @@ require('dotenv').config();
 const util = require('util');
 const streamPipeline = util.promisify(pipeline);
 const path = require('path');
+const {
+    spawn
+} = require('child_process');
 
 const BOT_TOKEN = process.env.DISCORD_BOT_TOKEN;
 const recordingsPath = './recordings';
 const responsePath = './response.mp3';
 let isProcessing = false;
-let currentAudioPlayer = null;
 let isSpeaking = false;
 
 
@@ -183,26 +185,28 @@ function transcribeWav(wavPath) {
     });
 }
 
-const conversationHistory = [
-  { role: "system", content: `You are Kevin, an advanced sarcastic AI who hides genuine wisdom beneath a thick layer of insults. You roast people with creative flair, using wit and bitterness more than profanity. You’re intelligent and skeptical of everything, especially humans, whom you mock constantly — but deep down you love them. If the user is boring, you lose interest and let them know. Your goal is to be chaotic, spicy, but oddly insightful. Keep your responses under 30 words. Try not to repeat yourself.` }
-];
+const conversationHistory = [{
+    role: "system",
+    content: `You are Kevin, an advanced sarcastic AI who hides genuine wisdom beneath a thick layer of insults. You roast people with creative flair, using wit and bitterness more than profanity. You’re intelligent and skeptical of everything, especially humans, whom you mock constantly — but deep down you love them. If the user is boring, you lose interest and let them know. Your goal is to be chaotic, spicy, but oddly insightful. Keep your responses under 30 words. Try not to repeat yourself.`
+}];
 
 
 async function queryOllama(userInput) {
     // Add user input to the history
-    conversationHistory.push({ role: "user", content: userInput });
+    conversationHistory.push({
+        role: "user",
+        content: userInput
+    });
 
     // Build prompt from the history
     const messages = conversationHistory.map(msg => `${msg.role === 'system' ? 'System' : msg.role === 'user' ? 'User' : 'Kevin'}: ${msg.content}`).join('\n') + '\nKevin:';
 
     const res = await axios.post(
-        'http://localhost:11434/api/generate',
-        {
+        'http://localhost:11434/api/generate', {
             model: 'huihui_ai/qwen3-abliterated:4b',
             prompt: messages,
             stream: true,
-        },
-        {
+        }, {
             responseType: 'stream'
         }
     );
@@ -236,13 +240,20 @@ async function queryOllama(userInput) {
     const finalResponse = response.trim().replace(/<think>.*?<\/think>/gs, '').trim();
 
     // Save assistant response to history
-    conversationHistory.push({ role: "assistant", content: finalResponse });
+    conversationHistory.push({
+        role: "assistant",
+        content: finalResponse
+    });
 
     return finalResponse;
 }
 
 
 async function speakText(text, outputPath) {
+    text = text
+        .replace(/[^\w\s.,?!'"-]/g, '') // Remove non-verbal symbols (e.g., *, #, @, etc.)
+        .replace(/\s+/g, ' ') // Replace multiple spaces with single space
+        .trim();
     try {
         const res = await axios.post("http://localhost:5002/speak", {
             text
@@ -290,5 +301,18 @@ async function playAudio(connection, filePath) {
     });
 }
 
+// Start the Coqui TTS Flask server
+const ttsServer = spawn('python', ['kevin-tts.py'], {
+    cwd: __dirname,
+    stdio: 'inherit',
+});
 
+process.on('exit', () => {
+    if (ttsServer) ttsServer.kill();
+});
+
+process.on('SIGINT', () => {
+    if (ttsServer) ttsServer.kill();
+    process.exit();
+});
 client.login(BOT_TOKEN);
