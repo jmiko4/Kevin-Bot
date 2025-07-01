@@ -1,0 +1,7 @@
+.env
+/deprecated
+/recordings
+/samples
+output.wav
+response.mp3
+/node_modules
